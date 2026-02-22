@@ -1,0 +1,65 @@
+#!/bin/bash
+
+# Set bash options for better error handling
+set -euo pipefail
+
+# Function to clean filenames
+clean_filename() {
+    local filename="$1"
+    # Remove control characters, replace problematic characters with underscores, and spaces with dashes
+    cleaned=$(echo "$filename" | tr -d '[:cntrl:]' | sed -e 's/[\\:*?"<>|]/_/g' -e 's/  */-/g' -e 's/^-*//' -e 's/-*$//')
+    echo "$cleaned"
+}
+
+# Function to process a single directory
+process_directory() {
+    local dir="$1"
+    local output_file="$dir/out.m4b"
+    local temp_file
+    temp_file="temp__$$"
+
+    # Find and sort MP3 files
+    find "$dir" -maxdepth 1 -type f -iname "*.mp3" | sort -V | while IFS= read -r file; do
+        # Escape single quotes in filenames
+        escaped_file=$(printf '%s' "$file" | sed "s/'/'\\\\''/g")
+        echo "file '$escaped_file'" >> "$temp_file"
+    done
+
+    # Check if any MP3 files were found
+    if [ ! -s "$temp_file" ]; then
+        echo "No MP3 files found in $dir"
+        rm "$temp_file"
+        return 1
+    fi
+
+    # Run ffmpeg with voice-quality settings
+    ffmpeg -f concat -safe 0 -i "$temp_file" -c:a aac -ar 22050 -b:a 64k -vn -f ipod -y "$output_file" </dev/null
+
+    echo "Successfully created $output_file"
+    rm "$temp_file"
+}
+
+# Main script
+main() {
+    # Check if ffmpeg is installed
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+        echo "Error: ffmpeg is not installed" >&2
+        exit 1
+    fi
+
+    # Process each directory provided as argument or current directory
+    if [ $# -eq 0 ]; then
+        process_directory "$(pwd)"
+    else
+        for dir in "$@"; do
+            if [ -d "$dir" ]; then
+                process_directory "$dir"
+            else
+                echo "Error: $dir is not a directory" >&2
+            fi
+        done
+    fi
+}
+
+main "$@"
+
