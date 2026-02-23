@@ -19,7 +19,7 @@ Cleanup() {
     [[ -f "$ConcatList" ]] && rm "$ConcatList"
 }
 
-# The trap now officially calls the cleanup function on exit or interrupt
+# Trap ensures Cleanup is called on exit or interruption
 trap Cleanup EXIT SIGINT SIGTERM
 
 # --- Functions ---
@@ -38,9 +38,9 @@ Options:
 Policies:
   - Sorting: Natural Sort (10 follows 9, not 1).
   - Audio:   Extracts .mp3, .m4a, .mp4.
-  - Covers:  Checks cover.{ext} then {title}.{ext}.
+  - Covers:  1. cover.{ext} | 2. folder.{ext} | 3. {title}.{ext} | 4. First image found.
              Exts: jpg, jpeg, png, webp, gif.
-  - Output:  AAC 128k, -f ipod.
+  - Output:  AAC 128k, MJPEG cover stream, -f ipod.
 EOF
     exit 0
 }
@@ -56,47 +56,29 @@ CheckDependencies() {
 
 FindCoverArt() {
     local Exts=("jpg" "jpeg" "png" "webp" "gif")
-
-    # 1. Primary: cover.{ext}
+    
+    # Priority 1-3: Specific naming conventions
     for Ext in "${Exts[@]}"; do
-        if [[ -f "cover.$Ext" ]]; then
-            CoverArt="cover.$Ext"
-            echo "Found primary cover: $CoverArt"
-            return 0
-        fi
+        for Name in "cover" "folder" "$TitleTag"; do
+            if [[ -f "$Name.$Ext" ]]; then
+                CoverArt="$Name.$Ext"
+                echo "Found cover art: $CoverArt"
+                return 0
+            fi
+        done
     done
 
-    # 2. Secondary: folder.{ext}
-    for Ext in "${Exts[@]}"; do
-        if [[ -f "folder.$Ext" ]]; then
-            CoverArt="folder.$Ext"
-            echo "Found folder cover: $CoverArt"
-            return 0
-        fi
-    done
-
-    # 3. Tertiary: {TitleTag}.{ext}
-    for Ext in "${Exts[@]}"; do
-        if [[ -f "$TitleTag.$Ext" ]]; then
-            CoverArt="$TitleTag.$Ext"
-            echo "Found title-based cover: $CoverArt"
-            return 0
-        fi
-    done
-
-    # 4. Catch-all: Use the first image file found in the directory
+    # Priority 4: Catch-all fallback - Use the first image file found
     local Fallback
     Fallback=$(ls *.jpg *.jpeg *.png *.webp *.gif 2>/dev/null | head -n 1) || true
     if [[ -n "$Fallback" ]]; then
         CoverArt="$Fallback"
-        echo "Found fallback cover: $CoverArt"
+        echo "Using fallback image: $CoverArt"
         return 0
     fi
 
-    echo "No image files found. Proceeding without cover art."
+    echo "No cover art found. Proceeding without an image."
 }
-
-
 
 PrepareAudio() {
     echo "Sanitizing filenames and building list..."
@@ -112,7 +94,7 @@ PrepareAudio() {
     mkdir -p "$WorkDir"
 
     while IFS= read -r File; do
-        # Replace spaces with dashes for the workspace copy
+        # Replace spaces with dashes for the workspace copy to be bulletproof
         local CleanName="${File// /-}"
         cp "$File" "$WorkDir/$CleanName"
         
@@ -125,13 +107,13 @@ PrepareAudio() {
 RunFfmpeg() {
     echo "Encoding to M4B..."
     local Args=(-f concat -safe 0 -i "$ConcatList")
-
+    
+    # Map the cover art if found, using MJPEG for M4B/iPod compatibility
     if [[ -n "$CoverArt" ]]; then
-        # We add -c:v mjpeg to ensure the image is compatible with the M4B container
         Args+=(
-            -i "$CoverArt"
-            -map 0:a -map 1
-            -c:v mjpeg
+            -i "$CoverArt" 
+            -map 0:a -map 1 
+            -c:v mjpeg 
             -pix_fmt yuvj420p
             -disposition:v:0 attached_pic
         )
@@ -139,10 +121,12 @@ RunFfmpeg() {
         Args+=(-map 0:a)
     fi
 
+    # Final audio and container settings
     Args+=(
-        -c:a aac -b:a 128k
-        -metadata title="$TitleTag"
-        -metadata artist="$AuthorTag"
+        -c:a aac 
+        -b:a 128k 
+        -metadata title="$TitleTag" 
+        -metadata artist="$AuthorTag" 
         -f ipod -y "$FinalM4B"
     )
 
@@ -151,7 +135,6 @@ RunFfmpeg() {
 
 # --- Main Execution ---
 
-# Parse Arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         -a|--author) AuthorTag="$2"; shift 2 ;;
@@ -166,5 +149,5 @@ FindCoverArt
 PrepareAudio
 RunFfmpeg
 
-echo "Process Complete."
-
+echo "---"
+echo "Process Complete: $FinalM4B"
