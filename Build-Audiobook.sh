@@ -28,7 +28,7 @@ ShowUsage() {
     cat << EOF
 Usage: $(basename "$0") [-a "Author"] [-t "Title"]
 
-Merge multiple audio files into a single M4B audiobook for iPhone.
+Merge multiple audio files in the current directory into a single M4B audiobook for iPhone.
 
 Options:
   -a, --author "Name"    Set author metadata.
@@ -37,8 +37,9 @@ Options:
 
 Policies:
   - Sorting: Natural Sort (10 follows 9, not 1).
-  - Audio:   Extracts .mp3, .m4a, .mp4.
-  - Covers:  1. cover.{ext} | 2. folder.{ext} | 3. {title}.{ext} | 4. First image found.
+  - Audio:   Extracts .mp3, .m4a, .mp4 from current directory.
+  - Covers:  Searches current directory for: 
+             1. cover.{ext} | 2. folder.{ext} | 3. {title}.{ext} | 4. First image found.
              Exts: jpg, jpeg, png, webp, gif.
   - Output:  AAC 128k, MJPEG cover stream, -f ipod.
 EOF
@@ -126,7 +127,10 @@ RunFfmpeg() {
         -c:a aac 
         -b:a 128k 
         -metadata title="$TitleTag" 
+        -metadata album="$TitleTag" 
         -metadata artist="$AuthorTag" 
+        -metadata album_artist="$AuthorTag" 
+        -metadata genre="Audiobook" 
         -f ipod -y "$FinalM4B"
     )
 
