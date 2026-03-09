@@ -40,8 +40,8 @@ Policies:
   - Audio:   Extracts .mp3, .m4a, .mp4 from current directory.
   - Covers:  Searches current directory for: 
              1. cover.{ext} | 2. folder.{ext} | 3. {title}.{ext} | 4. First image found.
-             Exts: jpg, jpeg, png, webp, gif.
-  - Output:  AAC 128k, MJPEG cover stream, -f ipod.
+             Exts: jpg, jpeg, png, webp, gif. Scaled to max 600x600 for iPhone.
+  - Output:  AAC-LC 128k @ 44100Hz stereo, MJPEG cover, -f ipod (iPhone compatible).
 EOF
     exit 0
 }
@@ -105,27 +105,49 @@ PrepareAudio() {
     done <<< "$RawFiles"
 }
 
+PrepareCoverArt() {
+    # iPhone requires cover art to be reasonable dimensions and proper JPEG format
+    # Scale to max 600x600 while maintaining aspect ratio for best compatibility
+    if [[ -n "$CoverArt" ]]; then
+        local PreparedCover="$WorkDir/cover_prepared.jpg"
+        echo "Preparing cover art for iPhone compatibility..."
+        ffmpeg -hide_banner -loglevel warning -i "$CoverArt" \
+            -vf "scale='min(600,iw)':'min(600,ih)':force_original_aspect_ratio=decrease" \
+            -q:v 2 -y "$PreparedCover"
+        CoverArt="$PreparedCover"
+    fi
+}
+
 RunFfmpeg() {
     echo "Encoding to M4B..."
     local Args=(-f concat -safe 0 -i "$ConcatList")
     
-    # Map the cover art if found, using MJPEG for M4B/iPod compatibility
+    # Map the cover art if found
+    # iPhone/iBooks requires: MJPEG codec, yuv420p pixel format, attached_pic disposition
     if [[ -n "$CoverArt" ]]; then
         Args+=(
             -i "$CoverArt" 
-            -map 0:a -map 1 
+            -map 0:a -map 1:v
             -c:v mjpeg 
-            -pix_fmt yuvj420p
+            -pix_fmt yuv420p
             -disposition:v:0 attached_pic
         )
     else
         Args+=(-map 0:a)
     fi
 
-    # Final audio and container settings
+    # iPhone/iBooks audio requirements:
+    # - AAC-LC profile (not HE-AAC)
+    # - Sample rate: 44100 Hz (standard) or 22050 Hz (audiobook)
+    # - Channels: mono (1) or stereo (2)
+    # - movflags +faststart: metadata at beginning for streaming/seeking
     Args+=(
-        -c:a aac 
-        -b:a 128k 
+        -c:a aac
+        -profile:a aac_low
+        -ar 44100
+        -ac 2
+        -b:a 128k
+        -movflags +faststart
         -metadata title="$TitleTag" 
         -metadata album="$TitleTag" 
         -metadata artist="$AuthorTag" 
@@ -151,6 +173,7 @@ done
 CheckDependencies
 FindCoverArt
 PrepareAudio
+PrepareCoverArt
 RunFfmpeg
 
 echo "---"
